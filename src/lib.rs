@@ -312,6 +312,12 @@ impl Config {
         self
     }
 
+    pub fn statik_blacklist_contains<S>(&self, val: S) -> bool
+        where String: PartialEq<S>
+    {
+        self.statik_blacklist.iter().any(|s| s == &val)
+    }
+
     /// Indicate that the library must be at least version `vers`.
     pub fn atleast_version(&mut self, vers: &str) -> &mut Config {
         self.atleast_version = Some(vers.to_string());
@@ -415,7 +421,7 @@ impl Config {
     }
 
     fn is_static(&self, name: &str) -> Statik {
-        if self.statik_blacklist.iter().any(|s| s == name) {
+        if self.statik_blacklist_contains(name) {
             Statik::No
         } else {
             match self.statik {
@@ -534,7 +540,7 @@ impl Library {
                         Statik::Force => true,
                         Statik::Yes => is_static_available(val, &dirs),
                         Statik::No => false,
-                    } {
+                    } && !config.statik_blacklist_contains(val) {
                         let meta = format!("rustc-link-lib=static={}", val);
                         config.print_metadata(&meta);
                     } else {
