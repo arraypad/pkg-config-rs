@@ -103,6 +103,7 @@ impl From<bool> for Statik {
 #[derive(Clone, Default)]
 pub struct Config {
     statik: Option<Statik>,
+    statik_blacklist: Vec<String>,
     atleast_version: Option<String>,
     extra_args: Vec<OsString>,
     cargo_metadata: bool,
@@ -280,6 +281,7 @@ impl Config {
     pub fn new() -> Config {
         Config {
             statik: None,
+            statik_blacklist: vec![],
             atleast_version: None,
             extra_args: vec![],
             print_system_libs: true,
@@ -296,6 +298,17 @@ impl Config {
         where S: Into<Statik>
     {
         self.statik = Some(statik.into());
+        self
+    }
+
+    pub fn statik_blacklist<S>(&mut self, blacklist: Vec<S>) -> &mut Config
+        where String: From<S>, S: Clone
+    {
+        self.statik_blacklist.extend(
+            blacklist
+                .iter()
+                .map(|s| String::from(s.clone()))
+        );
         self
     }
 
@@ -402,9 +415,13 @@ impl Config {
     }
 
     fn is_static(&self, name: &str) -> Statik {
-        match self.statik {
-            Some(ref statik) => statik.clone(),
-            None => self.infer_static(name),
+        if self.statik_blacklist.iter().any(|s| s == name) {
+            Statik::No
+        } else {
+            match self.statik {
+                Some(ref statik) => statik.clone(),
+                None => self.infer_static(name),
+            }
         }
     }
 
