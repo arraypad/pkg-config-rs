@@ -84,9 +84,25 @@ pub fn target_supported() -> bool {
     (host == target || env::var_os("PKG_CONFIG_ALLOW_CROSS").is_some())
 }
 
+#[derive(Clone, PartialEq)]
+pub enum Statik {
+    No,
+    Yes,
+    Force,
+}
+
+impl From<bool> for Statik {
+    fn from(o: bool) -> Self {
+        match o {
+            true => Statik::Yes,
+            false => Statik::No,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct Config {
-    statik: Option<bool>,
+    statik: Option<Statik>,
     atleast_version: Option<String>,
     extra_args: Vec<OsString>,
     cargo_metadata: bool,
@@ -276,8 +292,10 @@ impl Config {
     ///
     /// This will override the inference from environment variables described in
     /// the crate documentation.
-    pub fn statik(&mut self, statik: bool) -> &mut Config {
-        self.statik = Some(statik);
+    pub fn statik<S>(&mut self, statik: S) -> &mut Config
+        where S: Into<Statik>
+    {
+        self.statik = Some(statik.into());
         self
     }
 
@@ -383,14 +401,17 @@ impl Config {
         env::var_os(name)
     }
 
-    fn is_static(&self, name: &str) -> bool {
-        self.statik.unwrap_or_else(|| self.infer_static(name))
+    fn is_static(&self, name: &str) -> Statik {
+        match self.statik {
+            Some(ref statik) => statik.clone(),
+            None => self.infer_static(name),
+        }
     }
 
     fn command(&self, name: &str, args: &[&str]) -> Command {
         let exe = self.env_var("PKG_CONFIG").unwrap_or_else(|_| String::from("pkg-config"));
         let mut cmd = Command::new(exe);
-        if self.is_static(name) {
+        if self.is_static(name) != Statik::No {
             cmd.arg("--static");
         }
         cmd.args(args)
@@ -422,18 +443,20 @@ impl Config {
         }
     }
 
-    fn infer_static(&self, name: &str) -> bool {
+    fn infer_static(&self, name: &str) -> Statik {
         let name = envify(name);
-        if self.env_var_os(&format!("{}_STATIC", name)).is_some() {
-            true
+        if self.env_var_os(&format!("{}_STATIC_FORCE", name)).is_some() {
+            Statik::Force
+        } else if self.env_var_os(&format!("{}_STATIC", name)).is_some() {
+            Statik::Yes
         } else if self.env_var_os(&format!("{}_DYNAMIC", name)).is_some() {
-            false
+            Statik::No
         } else if self.env_var_os("PKG_CONFIG_ALL_STATIC").is_some() {
-            true
+            Statik::Yes
         } else if self.env_var_os("PKG_CONFIG_ALL_DYNAMIC").is_some() {
-            false
+            Statik::No
         } else {
-            false
+            Statik::No
         }
     }
 }
@@ -490,7 +513,11 @@ impl Library {
                         continue;
                     }
 
-                    if statik && is_static_available(val, &dirs) {
+                    if match statik {
+                        Statik::Force => true,
+                        Statik::Yes => is_static_available(val, &dirs),
+                        Statik::No => false,
+                    } {
                         let meta = format!("rustc-link-lib=static={}", val);
                         config.print_metadata(&meta);
                     } else {
